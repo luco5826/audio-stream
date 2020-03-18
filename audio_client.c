@@ -1,11 +1,17 @@
 #include <ao/ao.h>
-#include <arpa/inet.h>
+#ifdef _WIN32
+    #include <winsock2.h>
+    #define SOCK SOCKET
+#else
+    #include <arpa/inet.h>
+    #include <netdb.h>
+    #include <sys/socket.h> 
+    #define SOCK int
+#endif
 #include <fcntl.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 #define BITS 8
@@ -36,6 +42,15 @@ int main(int argc, char *argv[]) {
     port = port < 65000 && port > 1024 ? port : 30000;
     buffer_size = buffer_size > 10000 ? buffer_size : 64000;
 
+    // On Windows, we need to setup socket settings
+    #ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        printf("WSAStartup failed\n");
+        return 1;
+    }
+    #endif
+
     struct sockaddr_in clientaddr, servaddr;
     memset((char *)&servaddr, 0, sizeof(struct sockaddr_in));
     memset((char *)&clientaddr, 0, sizeof(struct sockaddr_in));
@@ -44,6 +59,7 @@ int main(int argc, char *argv[]) {
     servaddr.sin_family = AF_INET;
     clientaddr.sin_family = AF_INET;
 
+    printf("Searching for host %s\n", argv[1]);
     struct hostent *host = gethostbyname(argv[1]);
     if (host == NULL) {
         perror("Unable to find host:\n");
@@ -58,12 +74,12 @@ int main(int argc, char *argv[]) {
     int len = sizeof(servaddr);
 
     // TCP Socket creation
-    int tcpSocket;
+    SOCK tcpSocket;
     if ((tcpSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Error while creating socket:");
         exit(EXIT_FAILURE);
     }
-    if (setsockopt(tcpSocket, SOL_SOCKET, SO_REUSEADDR, &ok, sizeof(int)) < 0) {
+    if (setsockopt(tcpSocket, SOL_SOCKET, SO_REUSEADDR, (char*)&ok, sizeof(int)) < 0) {
         perror("Error while setting ReuseAddress:");
         exit(EXIT_FAILURE);
     }
@@ -82,8 +98,10 @@ int main(int argc, char *argv[]) {
     driver = ao_default_driver_id();
     buffer = (unsigned char *)malloc(sizeof(unsigned char) * buffer_size);
 
-    // Read audio file format
-    if (read(tcpSocket, &format, sizeof(ao_sample_format)) < 0) {
+    // Read audio file format, we use recv/send instead of read/write because of
+    // different socket implementation in Unix/Windows (recv/send calls library implementation,
+    // read/write are OS's API)
+    if (recv(tcpSocket, (char*)&format, sizeof(ao_sample_format), 0) < 0) {
         perror("Unable to read format:");
         exit(EXIT_FAILURE);
     }
@@ -94,14 +112,14 @@ int main(int argc, char *argv[]) {
     dev = ao_open_live(driver, &format, NULL);
 
     // Send ok to start reading data
-    if (write(tcpSocket, &ok, sizeof(int)) < 0) {
+    if (send(tcpSocket, (char*)&ok, sizeof(int), 0) < 0) {
         perror("Error while sending OK:");
         exit(EXIT_FAILURE);
     }
     printf("Reading data from %s\n", inet_ntoa(servaddr.sin_addr));
 
     int nread = 0;
-    while ((nread = read(tcpSocket, buffer, buffer_size)) > 0) {
+    while ((nread = recv(tcpSocket, (char*)buffer, buffer_size, 0)) > 0) {
         printf("PID:%d, Read %d bytes\n", getpid(), nread);
         if (ao_play(dev, buffer, nread) < 0) {
             perror("Error while playing:");
