@@ -37,11 +37,11 @@ int main(int argc, char *argv[]) {
         printf("Usage: audio_client <server ip> <server port = 30000> <buffer size = 64k>\n");
         exit(EXIT_FAILURE);
     }
-    int port = argc == 3 ? atoi(argv[2]) : 0;
-    int buffer_size = argc == 4 ? atoi(argv[3]) : 0;
+    int port = argc >= 3 ? atoi(argv[2]) : 0;
+    int buffer_size = argc >= 4 ? atoi(argv[3]) : 0;
     port = port < 65000 && port > 1024 ? port : 30000;
     buffer_size = buffer_size > 10000 ? buffer_size : 64000;
-
+    
     // On Windows, we need to setup socket settings
     #ifdef _WIN32
     WSADATA wsaData;
